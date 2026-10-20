@@ -5,6 +5,62 @@ inputs:
     description: Version of Temporal CLI to install (eg. '0.12.0' or 'latest')
     required: false
     default: latest
+  cache:
+    description: Restore and save the CLI using the GitHub Actions cache service
+    required: false
+    default: 'true'
+outputs:
+  cache-hit:
+    description: Whether an exact CLI cache entry was restored
+    value: ${{ steps.restore.outputs.cache-hit || 'false' }}
+  path:
+    description: Directory containing the installed Temporal CLI
+    value: ${{ steps.prepare.outputs.directory }}
 runs:
-  using: node24
-  main: dist/setup-temporal/index.js
+  using: composite
+  steps:
+    - name: Resolve Temporal CLI download
+      id: prepare
+      uses: actions/github-script@v8
+      env:
+        SETUP_TEMPORAL_ACTION_PATH: ${{ github.action_path }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_CACHE: ${{ inputs.cache }}
+      with:
+        script: |
+          const { pathToFileURL } = await import('node:url');
+          const { join } = await import('node:path');
+          const setup = await import(pathToFileURL(join(process.env.SETUP_TEMPORAL_ACTION_PATH, 'dist/setup-temporal/index.js')).href);
+          await setup.prepare();
+
+    - name: Restore Temporal CLI
+      id: restore
+      if: steps.prepare.outputs.cache-enabled == 'true'
+      uses: actions/cache/restore@v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.prepare.outputs.directory }}
+        key: ${{ steps.prepare.outputs.cache-key }}
+
+    - name: Install Temporal CLI
+      uses: actions/github-script@v8
+      env:
+        SETUP_TEMPORAL_ACTION_PATH: ${{ github.action_path }}
+        INPUT_DIRECTORY: ${{ steps.prepare.outputs.directory }}
+        INPUT_ARCHIVE-URL: ${{ steps.prepare.outputs.archive-url }}
+        INPUT_FILE-TO-EXTRACT: ${{ steps.prepare.outputs.file-to-extract }}
+        INPUT_CACHE-HIT: ${{ steps.restore.outputs.cache-hit || 'false' }}
+      with:
+        script: |
+          const { pathToFileURL } = await import('node:url');
+          const { join } = await import('node:path');
+          const setup = await import(pathToFileURL(join(process.env.SETUP_TEMPORAL_ACTION_PATH, 'dist/setup-temporal/index.js')).href);
+          await setup.install();
+
+    - name: Save Temporal CLI
+      if: steps.prepare.outputs.cache-enabled == 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      continue-on-error: true
+      with:
+        path: ${{ steps.prepare.outputs.directory }}
+        key: ${{ steps.prepare.outputs.cache-key }}

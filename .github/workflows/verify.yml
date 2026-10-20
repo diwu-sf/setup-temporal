@@ -44,6 +44,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      - run: npm test
 
   test:
     strategy:
@@ -63,8 +64,43 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run temporalio/setup-temporal
+        id: first
         uses: ./
+        with:
+          version: 1.9.1
 
-      - name: Verify setup
+      - name: Verify setup and remove the installed copy
+        env:
+          TEMPORAL_DIRECTORY: ${{ steps.first.outputs.path }}
         shell: bash
-        run: temporal -v
+        run: |
+          temporal -v
+          node -e 'require("node:fs").rmSync(process.env.TEMPORAL_DIRECTORY, { recursive: true, force: true })'
+
+      - name: Restore Temporal CLI from the remote cache
+        id: restored
+        uses: ./
+        with:
+          version: 1.9.1
+
+      - name: Verify cache hit and CLI execution
+        env:
+          CACHE_HIT: ${{ steps.restored.outputs.cache-hit }}
+        shell: bash
+        run: |
+          test "$CACHE_HIT" = true
+          temporal -v
+
+      - name: Install the latest version with caching disabled
+        id: uncached
+        uses: ./
+        with:
+          cache: 'false'
+
+      - name: Verify uncached setup
+        env:
+          CACHE_HIT: ${{ steps.uncached.outputs.cache-hit }}
+        shell: bash
+        run: |
+          test "$CACHE_HIT" = false
+          temporal -v

@@ -58498,9 +58498,27 @@ var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be isolated against other modules in the chunk.
 (() => {
 
+// EXPORTS
+__nccwpck_require__.d(__webpack_exports__, {
+  "dl": () => (/* binding */ cacheIdentity),
+  "N9": () => (/* binding */ install),
+  "oo": () => (/* binding */ installCli),
+  "wy": () => (/* binding */ parseVersion),
+  "Pl": () => (/* binding */ prepare)
+});
+
 // EXTERNAL MODULE: external "os"
 var external_os_ = __nccwpck_require__(2037);
 var external_os_default = /*#__PURE__*/__nccwpck_require__.n(external_os_);
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+var external_node_path_default = /*#__PURE__*/__nccwpck_require__.n(external_node_path_namespaceObject);
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(6005);
+;// CONCATENATED MODULE: external "node:fs"
+const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+;// CONCATENATED MODULE: external "node:fs/promises"
+const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs/promises");
 // EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js
 var lib_core = __nccwpck_require__(2186);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/node_modules/@actions/core/lib/utils.js
@@ -62285,6 +62303,10 @@ var setup_temporal_awaiter = (undefined && undefined.__awaiter) || function (thi
 
 
 
+
+
+
+
 function parseVersion(version) {
     const matchDetails = version.match(/^[v]?(\d+)(?:\.(\d+)(?:\.(\d+))?)?((?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/);
     if (matchDetails) {
@@ -62323,30 +62345,84 @@ function getCurrentPlatform() {
             throw new Error(`Unsupported platform: '${platform}'`);
     }
 }
-function run() {
+function cacheIdentity(info, platform, arch) {
+    // Resolve latest before keying the cache: its archive URL identifies the actual release.
+    const artifact = (0,external_node_crypto_.createHash)('sha256').update(info.archiveUrl).update('\0').update(info.fileToExtract).digest('hex');
+    return `setup-temporal-v1-${platform}-${arch}-${artifact}`;
+}
+function prepare() {
+    return setup_temporal_awaiter(this, void 0, void 0, function* () {
+        const version = parseVersion(lib_core.getInput('version'));
+        const cacheEnabled = lib_core.getBooleanInput('cache');
+        const platform = getCurrentPlatform();
+        const arch = getCurrentArch();
+        const info = yield getDownloadInfo(version, platform, arch);
+        const key = cacheIdentity(info, platform, arch);
+        const directory = external_node_path_default().join(external_os_default().homedir(), '.cache', 'setup-temporal', key);
+        lib_core.setOutput('cache-enabled', cacheEnabled);
+        lib_core.setOutput('cache-key', key);
+        lib_core.setOutput('directory', directory);
+        lib_core.setOutput('archive-url', info.archiveUrl);
+        lib_core.setOutput('file-to-extract', info.fileToExtract);
+    });
+}
+function executableExists(binary) {
     return setup_temporal_awaiter(this, void 0, void 0, function* () {
         try {
-            // Get version of tool to be installed
-            const version = parseVersion(lib_core.getInput('version'));
-            const platform = getCurrentPlatform();
-            const arch = getCurrentArch();
-            // Download the specific version of the tool, e.g. as a tarball/zipball
-            const downloadInfo = yield getDownloadInfo(version, platform, arch);
-            const pathToTarball = yield downloadTool(downloadInfo.archiveUrl);
-            // Extract the tarball/zipball onto host runner
-            const extract = downloadInfo.archiveUrl.endsWith('.zip') ? extractZip : extractTar;
-            const pathToCLI = yield extract(pathToTarball);
-            // Expose the tool by adding it to the PATH
-            lib_core.addPath(pathToCLI);
+            yield promises_namespaceObject.access(binary, external_node_fs_namespaceObject.constants.X_OK);
+            return (yield promises_namespaceObject.stat(binary)).isFile();
         }
-        catch (e) {
-            lib_core.setFailed(e.message);
+        catch (_a) {
+            return false;
         }
     });
 }
-run();
+function installCli(info, directory, cacheHit) {
+    return setup_temporal_awaiter(this, void 0, void 0, function* () {
+        const binary = external_node_path_default().join(directory, external_node_path_default().basename(info.fileToExtract));
+        if (cacheHit && (yield executableExists(binary))) {
+            lib_core.info('Using the restored Temporal CLI');
+        }
+        else {
+            if (cacheHit)
+                lib_core.warning('The restored cache has no executable Temporal CLI; downloading it again');
+            yield promises_namespaceObject.rm(directory, { recursive: true, force: true });
+            const archive = yield downloadTool(info.archiveUrl);
+            let extracted;
+            try {
+                extracted = info.archiveUrl.endsWith('.zip')
+                    ? yield extractZip(archive)
+                    : yield extractTar(archive);
+                yield promises_namespaceObject.mkdir(directory, { recursive: true });
+                yield promises_namespaceObject.copyFile(external_node_path_default().join(extracted, info.fileToExtract), binary);
+                if (process.platform !== 'win32')
+                    yield promises_namespaceObject.chmod(binary, 0o755);
+            }
+            finally {
+                yield promises_namespaceObject.rm(archive, { force: true });
+                if (extracted)
+                    yield promises_namespaceObject.rm(extracted, { recursive: true, force: true });
+            }
+        }
+        lib_core.addPath(directory);
+    });
+}
+function install() {
+    return setup_temporal_awaiter(this, void 0, void 0, function* () {
+        yield installCli({
+            archiveUrl: lib_core.getInput('archive-url', { required: true }),
+            fileToExtract: lib_core.getInput('file-to-extract', { required: true }),
+        }, lib_core.getInput('directory', { required: true }), lib_core.getInput('cache-hit') === 'true');
+    });
+}
 
 })();
 
+var __webpack_exports__cacheIdentity = __webpack_exports__.dl;
+var __webpack_exports__install = __webpack_exports__.N9;
+var __webpack_exports__installCli = __webpack_exports__.oo;
+var __webpack_exports__parseVersion = __webpack_exports__.wy;
+var __webpack_exports__prepare = __webpack_exports__.Pl;
+export { __webpack_exports__cacheIdentity as cacheIdentity, __webpack_exports__install as install, __webpack_exports__installCli as installCli, __webpack_exports__parseVersion as parseVersion, __webpack_exports__prepare as prepare };
 
 //# sourceMappingURL=index.js.map
