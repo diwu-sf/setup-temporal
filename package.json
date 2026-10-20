@@ -9,9 +9,10 @@
   "author": "Temporal Technologies Inc. <sdk@temporal.io>",
   "scripts": {
     "build": "ncc build src/setup-temporal.ts -o dist/setup-temporal --source-map --license LICENSE --stats-out dist/setup-temporal/stats.json && sed -i.bak -E 's/[[:space:]]+$//' dist/setup-temporal/index.js && rm -f dist/setup-temporal/index.js.bak dist/setup-temporal/sourcemap-register.js",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts",
-    "lint": "eslint src/**/*.ts"
+    "format": "prettier --write src/**/*.ts tests/**/*.mjs",
+    "format:check": "prettier --check src/**/*.ts tests/**/*.mjs",
+    "test": "tsc && node --test tests/*.test.mjs",
+    "lint": "eslint src/**/*.ts tests/**/*.mjs"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",

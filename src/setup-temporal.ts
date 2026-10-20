@@ -1,9 +1,13 @@
 import os from 'os';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as actionsCore from '@actions/core';
 import * as toolCache from '@actions/tool-cache';
-import { getDownloadInfo } from './download-info.js';
+import { DownloadInfo, getDownloadInfo } from './download-info.js';
 
-function parseVersion(version: string): string {
+export function parseVersion(version: string): string {
   const matchDetails = version.match(/^[v]?(\d+)(?:\.(\d+)(?:\.(\d+))?)?((?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/);
   if (matchDetails) {
     const major = matchDetails[1];
@@ -44,26 +48,67 @@ function getCurrentPlatform(): string {
   }
 }
 
-async function run() {
+export function cacheIdentity(info: DownloadInfo, platform: string, arch: string): string {
+  // Resolve latest before keying the cache: its archive URL identifies the actual release.
+  const artifact = createHash('sha256').update(info.archiveUrl).update('\0').update(info.fileToExtract).digest('hex');
+  return `setup-temporal-v1-${platform}-${arch}-${artifact}`;
+}
+
+export async function prepare(): Promise<void> {
+  const version = parseVersion(actionsCore.getInput('version'));
+  const cacheEnabled = actionsCore.getBooleanInput('cache');
+  const platform = getCurrentPlatform();
+  const arch = getCurrentArch();
+  const info = await getDownloadInfo(version, platform, arch);
+  const key = cacheIdentity(info, platform, arch);
+  const directory = path.join(os.homedir(), '.cache', 'setup-temporal', key);
+  actionsCore.setOutput('cache-enabled', cacheEnabled);
+  actionsCore.setOutput('cache-key', key);
+  actionsCore.setOutput('directory', directory);
+  actionsCore.setOutput('archive-url', info.archiveUrl);
+  actionsCore.setOutput('file-to-extract', info.fileToExtract);
+}
+
+async function executableExists(binary: string): Promise<boolean> {
   try {
-    // Get version of tool to be installed
-    const version = parseVersion(actionsCore.getInput('version'));
-    const platform = getCurrentPlatform();
-    const arch = getCurrentArch();
-
-    // Download the specific version of the tool, e.g. as a tarball/zipball
-    const downloadInfo = await getDownloadInfo(version, platform, arch);
-    const pathToTarball = await toolCache.downloadTool(downloadInfo.archiveUrl);
-
-    // Extract the tarball/zipball onto host runner
-    const extract = downloadInfo.archiveUrl.endsWith('.zip') ? toolCache.extractZip : toolCache.extractTar;
-    const pathToCLI = await extract(pathToTarball);
-
-    // Expose the tool by adding it to the PATH
-    actionsCore.addPath(pathToCLI);
-  } catch (e) {
-    actionsCore.setFailed((e as Error).message);
+    await fs.access(binary, constants.X_OK);
+    return (await fs.stat(binary)).isFile();
+  } catch {
+    return false;
   }
 }
 
-run();
+export async function installCli(info: DownloadInfo, directory: string, cacheHit: boolean): Promise<void> {
+  const binary = path.join(directory, path.basename(info.fileToExtract));
+  if (cacheHit && (await executableExists(binary))) {
+    actionsCore.info('Using the restored Temporal CLI');
+  } else {
+    if (cacheHit) actionsCore.warning('The restored cache has no executable Temporal CLI; downloading it again');
+    await fs.rm(directory, { recursive: true, force: true });
+    const archive = await toolCache.downloadTool(info.archiveUrl);
+    let extracted: string | undefined;
+    try {
+      extracted = info.archiveUrl.endsWith('.zip')
+        ? await toolCache.extractZip(archive)
+        : await toolCache.extractTar(archive);
+      await fs.mkdir(directory, { recursive: true });
+      await fs.copyFile(path.join(extracted, info.fileToExtract), binary);
+      if (process.platform !== 'win32') await fs.chmod(binary, 0o755);
+    } finally {
+      await fs.rm(archive, { force: true });
+      if (extracted) await fs.rm(extracted, { recursive: true, force: true });
+    }
+  }
+  actionsCore.addPath(directory);
+}
+
+export async function install(): Promise<void> {
+  await installCli(
+    {
+      archiveUrl: actionsCore.getInput('archive-url', { required: true }),
+      fileToExtract: actionsCore.getInput('file-to-extract', { required: true }),
+    },
+    actionsCore.getInput('directory', { required: true }),
+    actionsCore.getInput('cache-hit') === 'true',
+  );
+}

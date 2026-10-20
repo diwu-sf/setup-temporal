@@ -1,8 +1,10 @@
 # Releasing `setup-temporal`
 
-This repository is a JavaScript GitHub Action. The executable that GitHub runs
-is checked in under `dist/setup-temporal`, so every source change that affects
-the action must be built and committed before it is released.
+This repository is a composite GitHub Action. Its JavaScript entry points run
+through `actions/github-script` with Node.js 24, and its cache steps use the
+official `actions/cache` actions. The JavaScript bundle is checked in under
+`dist/setup-temporal`, so every source change that affects the action must be
+built and committed before it is released.
 
 ## Versioning and tags
 
